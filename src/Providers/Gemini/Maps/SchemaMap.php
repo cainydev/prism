@@ -28,7 +28,7 @@ class SchemaMap
         unset($schemaArray['additionalProperties'], $schemaArray['name']);
 
         if ($this->schema instanceof RawSchema) {
-            return $schemaArray;
+            return $this->normalizeRawSchema($schemaArray);
         }
 
         // AnyOfSchema: recursively process nested schemas to remove unsupported fields
@@ -73,6 +73,39 @@ class SchemaMap
                     : null,
             ])
         );
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    protected function normalizeRawSchema(array $schema): array
+    {
+        // Convert type arrays (e.g. ["string", "null"]) to scalar type + nullable
+        if (isset($schema['type']) && is_array($schema['type'])) {
+            $types = array_filter($schema['type'], fn (string $t): bool => $t !== 'null');
+            $schema['nullable'] = in_array('null', $schema['type'], true) ? true : ($schema['nullable'] ?? null);
+            $schema['type'] = reset($types) ?: 'string';
+        }
+
+        // Recursively normalize nested properties
+        if (isset($schema['properties']) && is_array($schema['properties'])) {
+            foreach ($schema['properties'] as $key => $property) {
+                if (is_array($property)) {
+                    $schema['properties'][$key] = $this->normalizeRawSchema($property);
+                }
+            }
+        }
+
+        // Recursively normalize array items
+        if (isset($schema['items']) && is_array($schema['items'])) {
+            $schema['items'] = $this->normalizeRawSchema($schema['items']);
+        }
+
+        // Remove fields unsupported by Gemini
+        unset($schema['additionalProperties'], $schema['$schema']);
+
+        return array_filter($schema, fn ($value): bool => $value !== null);
     }
 
     protected function mapType(): string
